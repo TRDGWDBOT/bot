@@ -1,0 +1,15 @@
+{
+  "name": "XAUBot Pro — Deriv Gold Trader",
+  "short_name": "XAUBot",
+  "description": "Trading automatico XAU/USD via Deriv WebSocket API",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#04060f",
+  "theme_color": "#d4a843",
+  "orientation": "portrait",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ],
+  "categories": ["finance"],
+  "lang": "it"
+}

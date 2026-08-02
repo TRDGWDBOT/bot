@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="bgGrad" cx="50%" cy="35%" r="65%">
+      <stop offset="0%" stop-color="#1a1400"/>
+      <stop offset="100%" stop-color="#04060f"/>
+    </radialGradient>
+    <linearGradient id="goldMain" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f5c842"/>
+      <stop offset="50%" stop-color="#d4a843"/>
+      <stop offset="100%" stop-color="#a07820"/>
+    </linearGradient>
+    <linearGradient id="goldVert" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#f5e070"/>
+      <stop offset="100%" stop-color="#c49030"/>
+    </linearGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="softGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="5" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="innerGlow" x="-10%" y="-10%" width="120%" height="120%">
+      <feGaussianBlur stdDeviation="12" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <clipPath id="roundClip">
+      <rect width="512" height="512" rx="110"/>
+    </clipPath>
+  </defs>
+
+  <!-- Background -->
+  <rect width="512" height="512" rx="110" fill="url(#bgGrad)"/>
+
+  <!-- Subtle grid -->
+  <g opacity="0.04" stroke="#d4a843" stroke-width="1" clip-path="url(#roundClip)">
+    <line x1="0" y1="128" x2="512" y2="128"/>
+    <line x1="0" y1="256" x2="512" y2="256"/>
+    <line x1="0" y1="384" x2="512" y2="384"/>
+    <line x1="128" y1="0" x2="128" y2="512"/>
+    <line x1="256" y1="0" x2="256" y2="512"/>
+    <line x1="384" y1="0" x2="384" y2="512"/>
+  </g>
+
+  <!-- Outer glow ring -->
+  <circle cx="256" cy="256" r="210" stroke="#d4a843" stroke-width="1.5" fill="none" opacity="0.18" filter="url(#softGlow)"/>
+
+  <!-- Dashed decorative ring -->
+  <circle cx="256" cy="256" r="200" stroke="url(#goldMain)" stroke-width="2.5" fill="none" opacity="0.35" stroke-dasharray="18 8"/>
+
+  <!-- Inner ring -->
+  <circle cx="256" cy="256" r="168" stroke="#d4a843" stroke-width="1" fill="none" opacity="0.12"/>
+
+  <!-- Medallion base -->
+  <circle cx="256" cy="256" r="148" fill="rgba(212,168,67,0.06)" stroke="url(#goldMain)" stroke-width="2" opacity="0.5"/>
+
+  <!-- Candlesticks -->
+  <g filter="url(#glow)">
+    <!-- Candle 1 bearish -->
+    <line x1="148" y1="175" x2="148" y2="345" stroke="#d4a843" stroke-width="3.5" stroke-linecap="round" opacity="0.4"/>
+    <rect x="133" y="220" width="30" height="70" rx="4" fill="rgba(255,61,90,0.15)" stroke="#ff3d5a" stroke-width="2.5"/>
+    <!-- Candle 2 doji -->
+    <line x1="210" y1="190" x2="210" y2="330" stroke="#d4a843" stroke-width="3.5" stroke-linecap="round" opacity="0.4"/>
+    <rect x="195" y="235" width="30" height="45" rx="4" fill="rgba(212,168,67,0.12)" stroke="#d4a843" stroke-width="2.5"/>
+    <!-- Candle 3 bullish hero -->
+    <line x1="272" y1="160" x2="272" y2="360" stroke="url(#goldVert)" stroke-width="4" stroke-linecap="round"/>
+    <rect x="255" y="195" width="34" height="110" rx="5" fill="rgba(0,229,160,0.18)" stroke="#00e5a0" stroke-width="3"/>
+    <!-- Candle 4 bullish -->
+    <line x1="334" y1="170" x2="334" y2="310" stroke="#d4a843" stroke-width="3.5" stroke-linecap="round" opacity="0.4"/>
+    <rect x="319" y="200" width="30" height="75" rx="4" fill="rgba(0,229,160,0.13)" stroke="#00e5a0" stroke-width="2.5"/>
+    <!-- Candle 5 bullish small -->
+    <line x1="396" y1="178" x2="396" y2="295" stroke="#d4a843" stroke-width="3.5" stroke-linecap="round" opacity="0.4"/>
+    <rect x="381" y="205" width="30" height="55" rx="4" fill="rgba(0,229,160,0.10)" stroke="#00e5a0" stroke-width="2" opacity="0.7"/>
+  </g>
+
+  <!-- Trend line -->
+  <polyline points="148,285 210,257 272,250 334,237 396,220" stroke="url(#goldMain)" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0.7"/>
+  <!-- Trend line glow -->
+  <polyline points="148,285 210,257 272,250 334,237 396,220" stroke="#f5c842" stroke-width="5" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0.15" filter="url(#innerGlow)"/>
+
+  <!-- Arrow tip -->
+  <polygon points="396,208 414,220 396,232" fill="url(#goldMain)" opacity="0.9"/>
+
+  <!-- Baseline -->
+  <line x1="110" y1="358" x2="402" y2="358" stroke="#d4a843" stroke-width="1.5" opacity="0.2" stroke-linecap="round"/>
+
+  <!-- AU symbol -->
+  <text x="256" y="412" text-anchor="middle" font-family="Georgia, serif" font-size="28" font-weight="700" fill="url(#goldMain)" opacity="0.55" letter-spacing="10">AU</text>
+
+  <!-- Top shine -->
+  <ellipse cx="256" cy="96" rx="130" ry="28" fill="rgba(255,255,255,0.04)"/>
+</svg>
