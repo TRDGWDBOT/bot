@@ -1,0 +1,15 @@
+# Frontend Dockerfile — build React + serve con nginx (con reverse proxy /api → backend)
+FROM node:20-alpine AS builder
+WORKDIR /app
+COPY frontend/package.json frontend/yarn.lock* ./
+RUN yarn install --frozen-lockfile || yarn install
+COPY frontend/ ./
+# REACT_APP_BACKEND_URL viene passato via build-arg (default: stesso host)
+ARG REACT_APP_BACKEND_URL=
+ENV REACT_APP_BACKEND_URL=$REACT_APP_BACKEND_URL
+RUN yarn build
+
+FROM nginx:alpine
+COPY --from=builder /app/build /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+EXPOSE 80
