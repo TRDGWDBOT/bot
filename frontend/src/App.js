@@ -3,19 +3,24 @@ import axios from "axios";
 
 const API = (() => {
   const env = process.env.REACT_APP_BACKEND_URL;
-  // In production, the deployed host serves both frontend and /api on the same origin.
-  // If the build-time REACT_APP_BACKEND_URL points to a different host than where the app
-  // is currently running, fall back to window.location.origin (same-origin /api).
-  try {
-    if (typeof window !== "undefined" && window.location?.host) {
-      if (!env) return `${window.location.origin}/api`;
-      const envHost = new URL(env).host;
-      if (envHost !== window.location.host) return `${window.location.origin}/api`;
-    }
-  } catch {}
-  return `${env || ""}/api`;
+  // Frontend e backend sono deployati come servizi separati (Render): usa sempre
+  // l'URL configurato in build. Il fallback a same-origin serve solo per lo
+  // scenario legacy (nginx che proxya /api sullo stesso dominio, es. docker-compose locale).
+  if (env) return `${env.replace(/\/$/, "")}/api`;
+  if (typeof window !== "undefined" && window.location?.origin) return `${window.location.origin}/api`;
+  return "/api";
 })();
 const POLL_MS = 1000;
+
+const SYMBOL_LABELS = {
+  frxXAUUSD: "XAU/USD", frxXAGUSD: "XAG/USD",
+  frxEURUSD: "EUR/USD", frxGBPUSD: "GBP/USD", frxUSDJPY: "USD/JPY",
+  frxAUDUSD: "AUD/USD", frxUSDCAD: "USD/CAD", frxUSDCHF: "USD/CHF", frxNZDUSD: "NZD/USD",
+  cryBTCUSD: "BTC/USD", cryETHUSD: "ETH/USD", cryLTCUSD: "LTC/USD", cryXRPUSD: "XRP/USD",
+  OTC_SPC: "US 500", OTC_NDX: "US Tech 100", OTC_DJI: "Wall St 30",
+  OTC_GDAXI: "Germany 40", OTC_FTSE: "UK 100", OTC_N225: "Japan 225",
+};
+const STRATEGY_LABELS = { ict: "ICT", price_action: "Price Action", combined: "ICT + PA", indicators: "Indicatori" };
 
 function fmt(v, d = 2) {
   if (v === null || v === undefined || isNaN(v) || v === 0) return "—";
@@ -41,6 +46,8 @@ export default function App() {
   const [token, setToken] = useState("");
   const [appId, setAppId] = useState("1089");
   const [env, setEnv] = useState("demo");
+  const [activeSymbol, setActiveSymbol] = useState("frxXAUUSD");
+  const [strategy, setStrategy] = useState("combined");
 
   // Risk fields
   const [stake, setStake] = useState(1);
@@ -108,7 +115,7 @@ export default function App() {
     if (!token.trim()) { setSetupErr("Inserisci il token Deriv"); return; }
     if (!appId.trim()) { setSetupErr("Inserisci l'App ID"); return; }
     try {
-      const r = await axios.post(`${API}/config`, { token: token.trim(), app_id: appId.trim(), env });
+      const r = await axios.post(`${API}/config`, { token: token.trim(), app_id: appId.trim(), env, active_symbol: activeSymbol, strategy });
       setState(r.data);
       if (r.data?.last_error) setSetupErr(r.data.last_error);
       else showToast("Connessione avviata...");
@@ -119,10 +126,20 @@ export default function App() {
 
   const saveSettings = async () => {
     try {
-      const r = await axios.post(`${API}/config`, { token: token.trim() || state?.token || "", app_id: appId.trim() || state?.app_id || "1089", env });
+      const r = await axios.post(`${API}/config`, { token: token.trim() || state?.token || "", app_id: appId.trim() || state?.app_id || "1089", env, active_symbol: activeSymbol, strategy });
       setState(r.data);
       setSettingsOpen(false);
       showToast("Salvato — riconnessione");
+    } catch (e) {
+      showToast(e?.response?.data?.detail || e.message);
+    }
+  };
+
+  const setActive = async (nextSymbol, nextStrategy) => {
+    try {
+      const r = await axios.post(`${API}/active`, { active_symbol: nextSymbol, strategy: nextStrategy });
+      setState(r.data);
+      showToast("Simbolo/strategia aggiornati");
     } catch (e) {
       showToast(e?.response?.data?.detail || e.message);
     }
@@ -175,9 +192,9 @@ export default function App() {
           <div className="setup-steps">
             <div className="setup-steps-title">COME OTTENERE IL TOKEN</div>
             <div className="setup-step"><span className="setup-step-num">1.</span> Vai su <a href="https://app.deriv.com/account/api-token" target="_blank" rel="noreferrer">app.deriv.com/account/api-token</a></div>
-            <div className="setup-step"><span className="setup-step-num">2.</span> Crea token con scope: <b>Read, Trade, Trading info, Payments, Admin</b></div>
-            <div className="setup-step"><span className="setup-step-num">3.</span> Copia il token (stringa alfanumerica, NON "pat_...")</div>
-            <div className="setup-step"><span className="setup-step-num">4.</span> Incollalo qui sotto. App ID <b>1089</b> = test pubblico.</div>
+            <div className="setup-step"><span className="setup-step-num">2.</span> Crea token con scope: <b>Trade, Account management</b></div>
+            <div className="setup-step"><span className="setup-step-num">3.</span> Copia il token (formato attuale: <code>pat_...</code>)</div>
+            <div className="setup-step"><span className="setup-step-num">4.</span> Incollalo qui sotto insieme al tuo App ID (da <a href="https://developers.deriv.com/dashboard" target="_blank" rel="noreferrer">developers.deriv.com/dashboard</a>, oppure <b>1089</b> per un test rapido).</div>
           </div>
 
           <div className="setup-section-label">TOKEN API DERIV</div>
@@ -185,17 +202,51 @@ export default function App() {
             <label>Token</label>
             <div className="input-wrap">
               <span className="input-icon">🔑</span>
-              <input data-testid="setup-token-input" type="text" value={token} onChange={(e) => setToken(e.target.value)} placeholder="es: a1B2c3D4e5F6..." autoComplete="off" spellCheck="false" />
+              <input data-testid="setup-token-input" type="text" value={token} onChange={(e) => setToken(e.target.value)} placeholder="pat_..." autoComplete="off" spellCheck="false" />
             </div>
           </div>
 
           <div className="setup-section-label">APP ID DERIV</div>
           <div className="setup-field">
-            <label>App ID (numero, default 1089)</label>
+            <label>App ID</label>
             <div className="input-wrap">
               <span className="input-icon">🆔</span>
               <input data-testid="setup-appid-input" type="text" value={appId} onChange={(e) => setAppId(e.target.value)} placeholder="1089" autoComplete="off" spellCheck="false" />
             </div>
+          </div>
+
+          <div className="setup-section-label">SIMBOLO PRINCIPALE (auto-trading)</div>
+          <div className="setup-field">
+            <div className="input-wrap">
+              <select data-testid="setup-symbol-select" value={activeSymbol} onChange={(e) => setActiveSymbol(e.target.value)} style={{ width: "100%", background: "transparent", border: "none", color: "inherit", fontFamily: "inherit" }}>
+                <option value="frxXAUUSD">XAU/USD — Oro</option>
+                <option value="frxXAGUSD">XAG/USD — Argento</option>
+                <option value="frxEURUSD">EUR/USD</option>
+                <option value="frxGBPUSD">GBP/USD</option>
+                <option value="frxUSDJPY">USD/JPY</option>
+                <option value="frxAUDUSD">AUD/USD</option>
+                <option value="frxUSDCAD">USD/CAD</option>
+                <option value="frxUSDCHF">USD/CHF</option>
+                <option value="frxNZDUSD">NZD/USD</option>
+                <option value="cryBTCUSD">BTC/USD</option>
+                <option value="cryETHUSD">ETH/USD</option>
+                <option value="cryLTCUSD">LTC/USD</option>
+                <option value="cryXRPUSD">XRP/USD</option>
+                <option value="OTC_SPC">US 500</option>
+                <option value="OTC_NDX">US Tech 100</option>
+                <option value="OTC_DJI">Wall Street 30</option>
+                <option value="OTC_GDAXI">Germany 40</option>
+                <option value="OTC_FTSE">UK 100</option>
+                <option value="OTC_N225">Japan 225</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="setup-section-label">STRATEGIA</div>
+          <div className="setup-env">
+            <button className={`env-btn ${strategy === "ict" ? "active" : ""}`} onClick={() => setStrategy("ict")}>ICT</button>
+            <button className={`env-btn ${strategy === "price_action" ? "active" : ""}`} onClick={() => setStrategy("price_action")}>PRICE ACTION</button>
+            <button className={`env-btn ${strategy === "combined" ? "active" : ""}`} onClick={() => setStrategy("combined")}>ICT + PA</button>
           </div>
 
           <div className="setup-section-label">TIPO DI CONTO (sceglie il token)</div>
@@ -237,13 +288,61 @@ export default function App() {
             <div className={`status-dot ${s.authorized ? "ok" : s.connected ? "connecting" : "err"}`} data-testid="status-dot"></div>
             <span className="status-txt" data-testid="status-text">{s.authorized ? `LIVE · ${s.loginid || ""}` : s.connected ? "CONNESSO" : "OFFLINE"}</span>
           </div>
-          <button className="btn-settings" onClick={() => { setToken(""); setAppId(s.app_id || "1089"); setEnv(s.env || "demo"); setSettingsOpen(true); }} data-testid="settings-btn">⚙</button>
+          <button className="btn-settings" onClick={() => { setToken(""); setAppId(s.app_id || "1089"); setEnv(s.env || "demo"); setActiveSymbol(s.active_symbol || "frxXAUUSD"); setStrategy(s.strategy || "combined"); setSettingsOpen(true); }} data-testid="settings-btn">⚙</button>
         </div>
       </div>
 
       {!s.authorized && (
         <div className={`conn-banner ${s.last_error ? "err" : ""}`} data-testid="conn-banner">
           {s.last_error ? "✗ " + s.last_error : "⟳ CONNESSIONE A DERIV..."}
+        </div>
+      )}
+
+      <div className="market-switch" data-testid="market-switch" style={{ display: "flex", gap: 8, padding: "8px 14px", overflowX: "auto" }}>
+        <select
+          data-testid="active-symbol-select"
+          value={s.active_symbol || activeSymbol}
+          onChange={(e) => { setActiveSymbol(e.target.value); setActive(e.target.value, s.strategy); }}
+          style={{ flex: 1, background: "var(--panel, #14161c)", color: "inherit", border: "1px solid var(--border, #2a2d36)", borderRadius: 8, padding: "8px 10px", fontFamily: "inherit" }}
+        >
+          {(s.watchlist && s.watchlist.length ? s.watchlist : [s.active_symbol]).map((sym) => (
+            <option key={sym} value={sym}>{SYMBOL_LABELS[sym] || sym}</option>
+          ))}
+        </select>
+        <select
+          data-testid="active-strategy-select"
+          value={s.strategy || strategy}
+          onChange={(e) => { setStrategy(e.target.value); setActive(s.active_symbol, e.target.value); }}
+          style={{ flex: 1, background: "var(--panel, #14161c)", color: "inherit", border: "1px solid var(--border, #2a2d36)", borderRadius: 8, padding: "8px 10px", fontFamily: "inherit" }}
+        >
+          <option value="ict">ICT</option>
+          <option value="price_action">Price Action</option>
+          <option value="combined">ICT + PA</option>
+          <option value="indicators">Indicatori (legacy)</option>
+        </select>
+      </div>
+
+      {s.markets && Object.keys(s.markets).length > 1 && (
+        <div className="watchlist-strip" data-testid="watchlist-strip" style={{ display: "flex", gap: 6, padding: "0 14px 8px", overflowX: "auto" }}>
+          {Object.entries(s.markets).map(([sym, mk]) => {
+            const d = mk.signals?.[s.strategy]?.dir || "WAIT";
+            const color = d === "BUY" ? "var(--buy)" : d === "SELL" ? "var(--sell)" : "var(--text2, #888)";
+            const isActive = sym === s.active_symbol;
+            return (
+              <div
+                key={sym}
+                onClick={() => { setActiveSymbol(sym); setActive(sym, s.strategy); }}
+                style={{
+                  flexShrink: 0, cursor: "pointer", padding: "6px 10px", borderRadius: 8,
+                  border: `1px solid ${isActive ? color : "var(--border, #2a2d36)"}`,
+                  background: isActive ? "rgba(255,255,255,0.05)" : "transparent",
+                  fontSize: 12, fontFamily: "var(--mono)", color,
+                }}
+              >
+                {SYMBOL_LABELS[sym] || sym} · {d}
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -285,6 +384,11 @@ export default function App() {
             dir === "SELL" ? `✓ SELL confermato — Score: ${score}` :
             `Neutro — Score: ${score}`}
         </div>
+        {!!(sig.reasons && sig.reasons.length) && (
+          <div className="sig-reasons-list" data-testid="signal-reasons" style={{ fontSize: 11, color: "var(--text2, #888)", padding: "0 4px 4px", lineHeight: 1.6 }}>
+            {sig.reasons.map((r, i) => <div key={i}>· {r}</div>)}
+          </div>
+        )}
         <div className="confirm-track"><div className="confirm-fill" style={{ width: ((sig.pending || 0) / (s.confirm_need || 5) * 100) + "%", background: arcColor }}></div></div>
         <div className="sig-levels">
           <div className="level-cell"><div className="level-lbl">ENTRY</div><div className="level-val" style={{ color: "var(--gold)" }}>{fmt(s.entry)}</div></div>
@@ -384,6 +488,20 @@ export default function App() {
           <div className="settings-field"><label>Nuovo Token API Deriv (vuoto = mantieni)</label><input type="text" value={token} onChange={(e) => setToken(e.target.value)} placeholder="lascia vuoto per non cambiare"/></div>
           <div className="settings-field"><label>App ID</label><input type="text" value={appId} onChange={(e) => setAppId(e.target.value)} placeholder="1089"/></div>
           <div className="settings-field">
+            <label>Simbolo principale</label>
+            <select value={activeSymbol} onChange={(e) => setActiveSymbol(e.target.value)} style={{ width: "100%", padding: 8, background: "transparent", color: "inherit", border: "1px solid var(--border, #2a2d36)", borderRadius: 8 }}>
+              {Object.entries(SYMBOL_LABELS).map(([sym, label]) => <option key={sym} value={sym}>{label}</option>)}
+            </select>
+          </div>
+          <div className="settings-field">
+            <label>Strategia</label>
+            <div className="settings-env">
+              <button className={`env-btn ${strategy === "ict" ? "active" : ""}`} onClick={() => setStrategy("ict")}>ICT</button>
+              <button className={`env-btn ${strategy === "price_action" ? "active" : ""}`} onClick={() => setStrategy("price_action")}>PA</button>
+              <button className={`env-btn ${strategy === "combined" ? "active" : ""}`} onClick={() => setStrategy("combined")}>ICT+PA</button>
+            </div>
+          </div>
+          <div className="settings-field">
             <label>Tipo Conto</label>
             <div className="settings-env">
               <button className={`env-btn ${env === "demo" ? "active" : ""}`} onClick={() => setEnv("demo")}>DEMO</button>
@@ -395,10 +513,10 @@ export default function App() {
           <div className="info-box">
             <div className="info-title">INFO API DERIV</div>
             <div className="info-txt">
-              WebSocket: ws.derivws.com<br/>
+              Connessione: REST (api.derivws.com) + OTP → WebSocket<br/>
               Token: <a href="https://app.deriv.com/account/api-token" target="_blank" rel="noreferrer">app.deriv.com/account/api-token</a><br/>
-              Symbol: frxXAUUSD<br/>
-              Bot server-side: il bot continua a girare anche con app chiusa.
+              Simboli attivi: {(s.watchlist || []).length}<br/>
+              Bot server-side: continua a girare anche con app chiusa.
             </div>
           </div>
         </div>
