@@ -41,6 +41,7 @@ export default function App() {
   const [toastMsg, setToastMsg] = useState("");
   const [prevPrice, setPrevPrice] = useState(0);
   const [setupErr, setSetupErr] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   // Setup/Settings form fields
   const [token, setToken] = useState("");
@@ -114,13 +115,17 @@ export default function App() {
     setSetupErr("");
     if (!token.trim()) { setSetupErr("Inserisci il token Deriv"); return; }
     if (!appId.trim()) { setSetupErr("Inserisci l'App ID"); return; }
+    setSubmitting(true);
     try {
-      const r = await axios.post(`${API}/config`, { token: token.trim(), app_id: appId.trim(), env, active_symbol: activeSymbol, strategy });
+      const r = await axios.post(`${API}/config`, { token: token.trim(), app_id: appId.trim(), env, active_symbol: activeSymbol, strategy }, { timeout: 60000 });
       setState(r.data);
       if (r.data?.last_error) setSetupErr(r.data.last_error);
       else showToast("Connessione avviata...");
     } catch (e) {
-      setSetupErr(e?.response?.data?.detail || e.message);
+      if (e.code === "ECONNABORTED") setSetupErr("Il server sta impiegando molto ad avviarsi (piano gratuito) — riprova tra poco");
+      else setSetupErr(e?.response?.data?.detail || e.message);
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -186,7 +191,7 @@ export default function App() {
   if (!isConfigured) {
     return (
       <div className="setup-screen" data-testid="setup-screen">
-        <div className="setup-title">XAUBOT</div>
+        <div className="setup-title">TRDGWDBOT</div>
         <div className="setup-badge"><div className="setup-badge-dot"></div><div className="setup-badge-txt">DERIV</div></div>
         <div className="setup-card">
           <div className="setup-steps">
@@ -257,7 +262,7 @@ export default function App() {
 
           {setupErr && <div className="setup-err" data-testid="setup-error">✗ {setupErr}</div>}
 
-          <button data-testid="setup-start-btn" className="btn-start" onClick={submitSetup}>AVVIA XAUBOT</button>
+          <button data-testid="setup-start-btn" className="btn-start" onClick={submitSetup} disabled={submitting}>{submitting ? "CONNESSIONE IN CORSO... (può richiedere fino a 1 min)" : "AVVIA TRDGWDBOT"}</button>
         </div>
       </div>
     );
@@ -280,7 +285,7 @@ export default function App() {
     <div className="app" data-testid="app">
       <div className="hdr">
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div className="hdr-logo">XAU<span>BOT</span></div>
+          <div className="hdr-logo">TRDGWD<span>BOT</span></div>
           <div className={`hdr-env ${s.account_type || "demo"}`} data-testid="env-badge">{(s.account_type || "demo").toUpperCase()}</div>
         </div>
         <div className="hdr-right">
