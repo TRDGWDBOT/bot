@@ -323,7 +323,7 @@ class DerivClient:
                 self.log("I", "Recupero conto e OTP via REST...")
                 url = await self._get_otp_url()
                 self.log("S", f"Conto {self.loginid} ({self.account_type}) saldo={self.balance}{self.currency}")
-                async with websockets.connect(url, ping_interval=20, ping_timeout=10) as ws:
+                async with websockets.connect(url, ping_interval=None) as ws:
                     self.ws = ws
                     self.connected = True
                     self.authorized = True  # l'OTP autentica già la connessione
@@ -367,20 +367,32 @@ class DerivClient:
                             ]
                     self.log("S", f"Watchlist attiva: {len(self.watchlist)} simboli — {', '.join(self.watchlist)}")
 
-                    # Receive loop
-                    async for raw in ws:
-                        try:
-                            msg = json.loads(raw)
-                        except Exception:
-                            continue
-                        await self._handle(msg)
+                    async def _keepalive():
+                        while True:
+                            await asyncio.sleep(20)
+                            try:
+                                await self._send_no_wait({"ping": 1})
+                            except Exception:
+                                return
+
+                    keepalive_task = asyncio.create_task(_keepalive())
+                    try:
+                        # Receive loop
+                        async for raw in ws:
+                            try:
+                                msg = json.loads(raw)
+                            except Exception:
+                                continue
+                            await self._handle(msg)
+                    finally:
+                        keepalive_task.cancel()
             except asyncio.CancelledError:
                 raise
             except Exception as e:
                 self.connected = False
                 self.authorized = False
-                self.last_error = str(e)
-                self.log("E", f"Connessione fallita: {e}")
+                self.last_error = str(e) or repr(e)
+                self.log("E", f"Connessione fallita: {self.last_error}")
                 await asyncio.sleep(backoff)
                 backoff = min(60, backoff * 2)
 
