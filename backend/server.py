@@ -636,7 +636,7 @@ class DerivClient:
 client = DerivClient()
 
 # ───────────────── FASTAPI ─────────────────
-app = FastAPI(title="XAUBot API")
+app = FastAPI(title="TRDGWDBOT API")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -677,7 +677,7 @@ class ActiveBody(BaseModel):
 
 @app.get("/api/")
 async def root():
-    return {"service": "XAUBot", "status": "ok"}
+    return {"service": "TRDGWDBOT", "status": "ok"}
 
 
 @app.get("/api/state")
