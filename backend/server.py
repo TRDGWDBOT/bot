@@ -18,6 +18,7 @@ import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+import certifi
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field
 
@@ -57,7 +58,7 @@ SYMBOLS = {
 STRATEGY_NAMES = ("ict", "price_action", "combined", "indicators")
 
 # ───────────────── MONGO ─────────────────
-mongo_client: AsyncIOMotorClient = AsyncIOMotorClient(MONGO_URL)
+mongo_client: AsyncIOMotorClient = AsyncIOMotorClient(MONGO_URL, tls=True, tlsCAFile=certifi.where())
 db = mongo_client[DB_NAME]
 
 # ───────────────── INDICATORS (port from JS) ─────────────────
