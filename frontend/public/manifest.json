@@ -1,6 +1,6 @@
 {
-  "name": "XAUBot Pro — Deriv Gold Trader",
-  "short_name": "XAUBot",
+  "name": "TRDGWDBOT — Deriv Trader",
+  "short_name": "TRDGWDBOT",
   "description": "Trading automatico XAU/USD via Deriv WebSocket API",
   "start_url": "./",
   "display": "standalone",
