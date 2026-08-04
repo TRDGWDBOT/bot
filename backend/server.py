@@ -335,14 +335,23 @@ class DerivClient:
                     await self._send_no_wait({"proposal_open_contract": 1, "subscribe": 1})
 
                     # Valida la watchlist contro i simboli davvero disponibili sul conto
-                    active = await self._send({"active_symbols": "brief"}, timeout=10)
-                    available = {s["symbol"] for s in active.get("active_symbols", [])}
-                    self.watchlist = []
-                    for name, deriv_sym in SYMBOLS.items():
-                        if deriv_sym in available:
-                            self.watchlist.append(deriv_sym)
-                        else:
-                            self.log("W", f"Simbolo non disponibile sul conto, saltato: {name} ({deriv_sym})")
+                    # (se questa richiesta è lenta o fallisce, non facciamo cadere la
+                    #  connessione: usiamo tutta la lista come fallback e lasciamo che
+                    #  i singoli subscribe/ticks_history falliscano da soli se un simbolo
+                    #  non è davvero disponibile)
+                    try:
+                        active = await self._send({"active_symbols": "brief"}, timeout=25)
+                        available = {s["symbol"] for s in active.get("active_symbols", [])}
+                        self.watchlist = []
+                        for name, deriv_sym in SYMBOLS.items():
+                            if deriv_sym in available:
+                                self.watchlist.append(deriv_sym)
+                            else:
+                                self.log("W", f"Simbolo non disponibile sul conto, saltato: {name} ({deriv_sym})")
+                    except Exception as e:
+                        self.log("W", f"active_symbols non risposto ({e}) — uso lista completa")
+                        self.watchlist = list(SYMBOLS.values())
+
                     if self.active_symbol not in self.watchlist and self.watchlist:
                         self.log("W", f"Simbolo attivo {self.active_symbol} non disponibile, passo a {self.watchlist[0]}")
                         self.active_symbol = self.watchlist[0]
