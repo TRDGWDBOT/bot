@@ -335,7 +335,7 @@ class DerivClient:
                     await self._send_no_wait({"proposal_open_contract": 1, "subscribe": 1})
 
                     # Valida la watchlist contro i simboli davvero disponibili sul conto
-                    active = await self._send({"active_symbols": "brief"}, timeout=20)
+                    active = await self._send({"active_symbols": "brief"}, timeout=10)
                     available = {s["symbol"] for s in active.get("active_symbols", [])}
                     self.watchlist = []
                     for name, deriv_sym in SYMBOLS.items():
@@ -348,24 +348,33 @@ class DerivClient:
                         self.active_symbol = self.watchlist[0]
 
                     # Storico + subscribe ticks per ogni simbolo della watchlist
+                    # (ogni simbolo è isolato: se uno fallisce/non risponde, si salta senza
+                    #  far cadere l'intera connessione)
+                    ok_count = 0
                     for sym in self.watchlist:
                         m = self._market(sym)
-                        await self._send_no_wait({"ticks": sym, "subscribe": 1})
-                        hist = await self._send({
-                            "ticks_history": sym,
-                            "adjust_start_time": 1,
-                            "count": 120,
-                            "end": "latest",
-                            "start": 1,
-                            "style": "candles",
-                            "granularity": 60,
-                        }, timeout=20)
-                        if hist.get("candles"):
-                            m["candles"] = [
-                                {"open": c["open"], "high": c["high"], "low": c["low"], "close": c["close"]}
-                                for c in hist["candles"]
-                            ]
-                    self.log("S", f"Watchlist attiva: {len(self.watchlist)} simboli — {', '.join(self.watchlist)}")
+                        try:
+                            await self._send_no_wait({"ticks": sym, "subscribe": 1})
+                            hist = await self._send({
+                                "ticks_history": sym,
+                                "adjust_start_time": 1,
+                                "count": 120,
+                                "end": "latest",
+                                "start": 1,
+                                "style": "candles",
+                                "granularity": 60,
+                            }, timeout=8)
+                            if hist.get("candles"):
+                                m["candles"] = [
+                                    {"open": c["open"], "high": c["high"], "low": c["low"], "close": c["close"]}
+                                    for c in hist["candles"]
+                                ]
+                                ok_count += 1
+                        except asyncio.TimeoutError:
+                            self.log("W", f"Storico {sym}: timeout, salto (riproverà sui tick live)")
+                        except Exception as e:
+                            self.log("W", f"Storico {sym}: {e}")
+                    self.log("S", f"Watchlist attiva: {len(self.watchlist)} simboli — storico caricato per {ok_count}")
 
                     async def _keepalive():
                         while True:
