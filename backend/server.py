@@ -569,22 +569,29 @@ class DerivClient:
             raise RuntimeError("Non autenticato")
         sym = symbol or self.active_symbol
         contract_type = "MULTUP" if direction == "BUY" else "MULTDOWN"
-        payload = {
-            "buy": 1,
-            "price": stake,
-            "parameters": {
-                "amount": stake,
-                "basis": "stake",
-                "contract_type": contract_type,
-                "currency": self.currency,
-                "symbol": sym,
-                "multiplier": multiplier,
-            },
+
+        # Step 1: proposal — chiede un preventivo per il contratto
+        prop_payload = {
+            "proposal": 1,
+            "amount": stake,
+            "basis": "stake",
+            "contract_type": contract_type,
+            "currency": self.currency,
+            "symbol": sym,
+            "multiplier": multiplier,
         }
-        resp = await self._send(payload, timeout=20)
-        if resp.get("error"):
-            raise RuntimeError(resp["error"].get("message", "Errore ordine"))
-        buy = resp.get("buy", {})
+        prop_resp = await self._send(prop_payload, timeout=15)
+        if prop_resp.get("error"):
+            raise RuntimeError(prop_resp["error"].get("message", "Errore proposal"))
+        proposal_id = prop_resp.get("proposal", {}).get("id")
+        if not proposal_id:
+            raise RuntimeError("Proposal senza id nella risposta")
+
+        # Step 2: buy — acquista usando l'id del preventivo appena ottenuto
+        buy_resp = await self._send({"buy": proposal_id, "price": stake}, timeout=15)
+        if buy_resp.get("error"):
+            raise RuntimeError(buy_resp["error"].get("message", "Errore ordine"))
+        buy = buy_resp.get("buy", {})
         cid = buy.get("contract_id")
         self.trades_total += 1
         self.log("S", f"Ordine {direction} #{cid} aperto a ${buy.get('buy_price')}")
