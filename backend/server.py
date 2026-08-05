@@ -56,6 +56,7 @@ SYMBOLS = {
     "JPN225": "OTC_N225",
 }
 STRATEGY_NAMES = ("ict", "price_action", "combined", "indicators")
+VALID_MULTIPLIERS = (100, 200, 300, 500, 800)
 
 # ───────────────── MONGO ─────────────────
 mongo_client: AsyncIOMotorClient = AsyncIOMotorClient(MONGO_URL, tls=True, tlsCAFile=certifi.where())
@@ -206,11 +207,20 @@ class DerivClient:
         self.last_auto_dir: Optional[str] = None
         self.open_contracts: dict[int, dict] = {}
         self.contracts_subscribed: set[int] = set()
+        self.pending_trade_meta: dict[int, dict] = {}  # contract_id -> {source, symbol, strategy, direction, stake, multiplier}
+        # Parametri auto-trading (configurabili dall'utente)
+        self.auto_stake: float = 1.0
+        self.auto_multiplier: int = 100
+        self.max_open_positions: int = 3
         # Stats
         self.session_pnl = 0.0
         self.trades_total = 0
         self.trades_win = 0
         self.profit_total = 0.0
+        self.auto_trades_total = 0
+        self.auto_trades_win = 0
+        self.manual_trades_total = 0
+        self.manual_trades_win = 0
         # Logs (ring buffer)
         self.logs = deque(maxlen=200)
 
@@ -258,6 +268,9 @@ class DerivClient:
             self.active_symbol = cfg.get("active_symbol", self.active_symbol)
             self.strategy = cfg.get("strategy", self.strategy)
             self.auto_mode = cfg.get("auto_mode", False)
+            self.auto_stake = cfg.get("auto_stake", self.auto_stake)
+            self.auto_multiplier = cfg.get("auto_multiplier", self.auto_multiplier)
+            self.max_open_positions = cfg.get("max_open_positions", self.max_open_positions)
             self.log("I", f"Config caricata da DB (env={self.env}, symbol={self.active_symbol}, strategy={self.strategy})")
             asyncio.create_task(self._run_loop())
 
@@ -467,19 +480,26 @@ class DerivClient:
                 if poc.get("is_sold"):
                     if cid in self.open_contracts:
                         profit = float(poc.get("profit", 0))
-                        self.trades_total = max(self.trades_total, self.trades_total)  # already counted on buy
+                        meta = self.pending_trade_meta.pop(cid, {})
+                        source = meta.get("source", "manual")
                         if profit >= 0:
                             self.trades_win += 1
+                            if source == "auto":
+                                self.auto_trades_win += 1
+                            else:
+                                self.manual_trades_win += 1
                         self.profit_total = round(self.profit_total + profit, 2)
                         self.session_pnl = round(self.session_pnl + profit, 2)
-                        self.log("S" if profit >= 0 else "E", f"Chiuso {cid}: {profit:+.2f} {self.currency}")
-                        await db.trades.insert_one({
-                            "_id": str(uuid.uuid4()),
-                            "contract_id": cid,
-                            "profit": profit,
-                            "ts": datetime.now(timezone.utc).isoformat(),
-                            "details": poc,
-                        })
+                        self.log("S" if profit >= 0 else "E", f"Chiuso {cid}: {profit:+.2f} {self.currency} ({source})")
+                        await db.trades.update_one(
+                            {"contract_id": cid},
+                            {"$set": {
+                                "status": "closed",
+                                "profit": profit,
+                                "sell_price": poc.get("sell_price"),
+                                "closed_at": datetime.now(timezone.utc).isoformat(),
+                            }},
+                        )
                         self.open_contracts.pop(cid, None)
                 else:
                     self.open_contracts[cid] = poc
@@ -556,17 +576,20 @@ class DerivClient:
         }
 
         if self.auto_mode and confirmed and self.filter_ok and d != "WAIT" and d != self.last_auto_dir:
-            if len(self.open_contracts) < 3:
+            if len(self.open_contracts) < self.max_open_positions:
                 self.log("S", f"AUTO trigger [{self.strategy}] {symbol}: {d} (score={sig['score']}, conf={sig['conf']}%)")
                 try:
-                    await self.place_order(d)
+                    await self.place_order(d, stake=self.auto_stake, multiplier=self.auto_multiplier, symbol=symbol, source="auto", strategy=self.strategy)
                     self.last_auto_dir = d
                 except Exception as e:
                     self.log("E", f"AUTO order fallito: {e}")
 
-    async def place_order(self, direction: str, stake: float = 1.0, multiplier: int = 10, symbol: Optional[str] = None):
+    async def place_order(self, direction: str, stake: float = 1.0, multiplier: int = 100, symbol: Optional[str] = None, source: str = "manual", strategy: Optional[str] = None):
         if not self.authorized:
             raise RuntimeError("Non autenticato")
+        if multiplier not in VALID_MULTIPLIERS:
+            # Arrotonda al valore valido più vicino invece di far fallire l'ordine
+            multiplier = min(VALID_MULTIPLIERS, key=lambda v: abs(v - multiplier))
         sym = symbol or self.active_symbol
         contract_type = "MULTUP" if direction == "BUY" else "MULTDOWN"
 
@@ -595,9 +618,31 @@ class DerivClient:
         buy = buy_resp.get("buy", {})
         cid = buy.get("contract_id")
         self.trades_total += 1
-        self.log("S", f"Ordine {direction} #{cid} aperto a ${buy.get('buy_price')}")
-        # Subscribe to specific contract for updates
+        if source == "auto":
+            self.auto_trades_total += 1
+        else:
+            self.manual_trades_total += 1
+        self.log("S", f"Ordine {direction} #{cid} aperto a ${buy.get('buy_price')} ({source})")
+
         if cid:
+            self.pending_trade_meta[cid] = {
+                "source": source, "symbol": sym, "strategy": strategy or self.strategy,
+                "direction": direction, "stake": stake, "multiplier": multiplier,
+            }
+            await db.trades.insert_one({
+                "_id": str(uuid.uuid4()),
+                "contract_id": cid,
+                "source": source,
+                "symbol": sym,
+                "strategy": strategy or self.strategy,
+                "direction": direction,
+                "stake": stake,
+                "multiplier": multiplier,
+                "buy_price": buy.get("buy_price"),
+                "status": "open",
+                "opened_at": datetime.now(timezone.utc).isoformat(),
+            })
+            # Subscribe to specific contract for updates
             await self._send_no_wait({"proposal_open_contract": 1, "contract_id": cid, "subscribe": 1})
         return {"contract_id": cid, "buy_price": buy.get("buy_price")}
 
@@ -662,11 +707,19 @@ class DerivClient:
                 }
                 for p in self.open_contracts.values()
             ],
+            "auto_stake": self.auto_stake,
+            "auto_multiplier": self.auto_multiplier,
+            "max_open_positions": self.max_open_positions,
+            "valid_multipliers": VALID_MULTIPLIERS,
             "stats": {
                 "trades_total": self.trades_total,
                 "trades_win": self.trades_win,
                 "profit_total": self.profit_total,
                 "session_pnl": self.session_pnl,
+                "auto_trades_total": self.auto_trades_total,
+                "auto_trades_win": self.auto_trades_win,
+                "manual_trades_total": self.manual_trades_total,
+                "manual_trades_win": self.manual_trades_win,
             },
             "logs": list(self.logs)[:60],
         }
@@ -701,12 +754,18 @@ class ConfigBody(BaseModel):
 class OrderBody(BaseModel):
     direction: str  # BUY / SELL
     stake: float = 1.0
-    multiplier: int = 10
+    multiplier: int = 100
     symbol: Optional[str] = None
 
 
 class AutoBody(BaseModel):
     enabled: bool
+
+
+class AutoSettingsBody(BaseModel):
+    auto_stake: Optional[float] = None
+    auto_multiplier: Optional[int] = None
+    max_open_positions: Optional[int] = None
 
 
 class ActiveBody(BaseModel):
@@ -770,7 +829,7 @@ async def place_order(body: OrderBody):
     if not client.authorized:
         raise HTTPException(400, "Non autenticato — configura prima il token")
     try:
-        r = await client.place_order(body.direction, body.stake, body.multiplier, body.symbol)
+        r = await client.place_order(body.direction, body.stake, body.multiplier, body.symbol, source="manual")
         return {"ok": True, **r}
     except Exception as e:
         raise HTTPException(400, str(e))
@@ -795,12 +854,56 @@ async def set_auto(body: AutoBody):
     return {"auto_mode": client.auto_mode}
 
 
-@app.get("/api/trades")
-async def get_trades(limit: int = 50):
-    cursor = db.trades.find().sort("ts", -1).limit(limit)
+@app.post("/api/auto-settings")
+async def set_auto_settings(body: AutoSettingsBody):
+    """Parametrizza l'auto-trading: stake, leva, numero massimo di posizioni aperte contemporaneamente."""
+    updates = {}
+    if body.auto_stake is not None:
+        if body.auto_stake <= 0:
+            raise HTTPException(400, "auto_stake deve essere positivo")
+        client.auto_stake = body.auto_stake
+        updates["auto_stake"] = body.auto_stake
+    if body.auto_multiplier is not None:
+        if body.auto_multiplier not in VALID_MULTIPLIERS:
+            raise HTTPException(400, f"auto_multiplier deve essere uno di {VALID_MULTIPLIERS}")
+        client.auto_multiplier = body.auto_multiplier
+        updates["auto_multiplier"] = body.auto_multiplier
+    if body.max_open_positions is not None:
+        if body.max_open_positions < 1:
+            raise HTTPException(400, "max_open_positions deve essere almeno 1")
+        client.max_open_positions = body.max_open_positions
+        updates["max_open_positions"] = body.max_open_positions
+    if updates:
+        await db.config.update_one({"_id": "main"}, {"$set": updates}, upsert=True)
+        client.log("I", f"Parametri auto aggiornati: {updates}")
+    return client.get_state()
+
+
+@app.get("/api/history")
+async def get_history(limit: int = 100, source: Optional[str] = None, symbol: Optional[str] = None, status: Optional[str] = None):
+    """Storico operazioni (manuali + automatiche), con filtri opzionali."""
+    query: dict = {}
+    if source in ("manual", "auto"):
+        query["source"] = source
+    if symbol:
+        query["symbol"] = symbol
+    if status in ("open", "closed"):
+        query["status"] = status
+    cursor = db.trades.find(query).sort("opened_at", -1).limit(min(limit, 500))
     out = []
     async for d in cursor:
-        d.pop("details", None)
+        d["id"] = d.pop("_id")
+        out.append(d)
+    return {"trades": out, "count": len(out)}
+
+
+@app.get("/api/trades")
+async def get_trades(limit: int = 50):
+    # Mantenuto per compatibilità — preferire /api/history
+    cursor = db.trades.find().sort("opened_at", -1).limit(limit)
+    out = []
+    async for d in cursor:
+        d["id"] = d.pop("_id")
         out.append(d)
     return out
 
