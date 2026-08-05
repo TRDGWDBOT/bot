@@ -571,13 +571,14 @@ class DerivClient:
         contract_type = "MULTUP" if direction == "BUY" else "MULTDOWN"
 
         # Step 1: proposal — chiede un preventivo per il contratto
+        # NB: su questa versione dell'API il campo si chiama "underlying_symbol", non "symbol"
         prop_payload = {
             "proposal": 1,
             "amount": stake,
             "basis": "stake",
             "contract_type": contract_type,
             "currency": self.currency,
-            "symbol": sym,
+            "underlying_symbol": sym,
             "multiplier": multiplier,
         }
         prop_resp = await self._send(prop_payload, timeout=15)
