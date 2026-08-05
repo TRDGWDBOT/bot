@@ -52,7 +52,13 @@ export default function App() {
 
   // Risk fields
   const [stake, setStake] = useState(1);
-  const [mult, setMult] = useState(10);
+  const [mult, setMult] = useState(100);
+  const [autoStake, setAutoStake] = useState(1);
+  const [autoMult, setAutoMult] = useState(100);
+  const [maxPos, setMaxPos] = useState(3);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [history, setHistory] = useState([]);
+  const [historyFilter, setHistoryFilter] = useState("all");
 
   const toastTimerRef = useRef(null);
   const wakeLockRef = useRef(null);
@@ -83,6 +89,17 @@ export default function App() {
     const id = setInterval(fetchState, POLL_MS);
     return () => clearInterval(id);
   }, [fetchState]);
+
+  // Sincronizza i parametri auto-trading dal server una sola volta al primo caricamento
+  const autoSettingsSynced = useRef(false);
+  useEffect(() => {
+    if (state && !autoSettingsSynced.current) {
+      if (state.auto_stake != null) setAutoStake(state.auto_stake);
+      if (state.auto_multiplier != null) setAutoMult(state.auto_multiplier);
+      if (state.max_open_positions != null) setMaxPos(state.max_open_positions);
+      autoSettingsSynced.current = true;
+    }
+  }, [state]);
 
   // Wake Lock — keep screen on while connected (only Android Chrome supports it)
   useEffect(() => {
@@ -157,7 +174,7 @@ export default function App() {
   const placeOrder = async (dir) => {
     if (!state?.authorized) return showToast("Non autenticato");
     try {
-      await axios.post(`${API}/order`, { direction: dir, stake: Number(stake) || 1, multiplier: Number(mult) || 10 });
+      await axios.post(`${API}/order`, { direction: dir, stake: Number(stake) || 1, multiplier: Number(mult) || 100 });
       showToast(`✓ Ordine ${dir} aperto`);
     } catch (e) {
       showToast("✗ " + (e?.response?.data?.detail || e.message));
@@ -180,6 +197,41 @@ export default function App() {
     } catch (e) {
       showToast(e?.response?.data?.detail || e.message);
     }
+  };
+
+  const saveAutoSettings = async () => {
+    try {
+      const r = await axios.post(`${API}/auto-settings`, {
+        auto_stake: Number(autoStake) || 1,
+        auto_multiplier: Number(autoMult) || 100,
+        max_open_positions: Number(maxPos) || 3,
+      });
+      setState(r.data);
+      showToast("Parametri auto-trading salvati");
+    } catch (e) {
+      showToast("✗ " + (e?.response?.data?.detail || e.message));
+    }
+  };
+
+  const fetchHistory = async (filter) => {
+    try {
+      const params = {};
+      if (filter && filter !== "all") params.source = filter;
+      const r = await axios.get(`${API}/history`, { params });
+      setHistory(r.data.trades || []);
+    } catch (e) {
+      showToast("✗ " + (e?.response?.data?.detail || e.message));
+    }
+  };
+
+  const openHistory = () => {
+    setHistoryOpen(true);
+    fetchHistory(historyFilter);
+  };
+
+  const changeHistoryFilter = (f) => {
+    setHistoryFilter(f);
+    fetchHistory(f);
   };
 
   // ── Loading ──
@@ -447,13 +499,38 @@ export default function App() {
         <div className="stat-tile"><div className="stat-v" style={{ color: (s.stats?.profit_total || 0) >= 0 ? "var(--buy)" : "var(--sell)" }}>{(s.stats?.profit_total || 0) >= 0 ? "+" : ""}{(s.stats?.profit_total || 0).toFixed(2)}</div><div className="stat-l">P&amp;L</div></div>
         <div className="stat-tile"><div className="stat-v">{fmt(s.balance)}</div><div className="stat-l">BALANCE</div></div>
       </div>
+      <div className="stats-grid" style={{ marginTop: 6 }}>
+        <div className="stat-tile"><div className="stat-v" style={{ fontSize: 16 }}>{s.stats?.manual_trades_total || 0} <span style={{ fontSize: 11, color: "var(--text2, #888)" }}>manuali</span></div><div className="stat-l">{s.stats?.manual_trades_total > 0 ? Math.round((s.stats.manual_trades_win / s.stats.manual_trades_total) * 100) + "% win" : "—"}</div></div>
+        <div className="stat-tile"><div className="stat-v" style={{ fontSize: 16 }}>{s.stats?.auto_trades_total || 0} <span style={{ fontSize: 11, color: "var(--text2, #888)" }}>auto</span></div><div className="stat-l">{s.stats?.auto_trades_total > 0 ? Math.round((s.stats.auto_trades_win / s.stats.auto_trades_total) * 100) + "% win" : "—"}</div></div>
+      </div>
+      <button className="btn-history" data-testid="open-history-btn" onClick={openHistory} style={{ width: "100%", marginTop: 8, padding: 10, borderRadius: 8, background: "transparent", border: "1px solid var(--border, #2a2d36)", color: "var(--gold)", fontFamily: "var(--mono)", letterSpacing: 1 }}>📜 STORICO OPERAZIONI</button>
 
-      <div className="sec-title">GESTIONE RISCHIO</div>
+      <div className="sec-title">GESTIONE RISCHIO (manuale)</div>
       <div className="risk-card">
         <div className="risk-grid">
           <div className="risk-field"><label>Stake ($)</label><input data-testid="cfg-stake-input" type="number" value={stake} onChange={(e) => setStake(e.target.value)} min="1"/></div>
-          <div className="risk-field"><label>Leva</label><input data-testid="cfg-mult-input" type="number" value={mult} onChange={(e) => setMult(e.target.value)} min="1" max="1000"/></div>
+          <div className="risk-field">
+            <label>Leva</label>
+            <select data-testid="cfg-mult-input" value={mult} onChange={(e) => setMult(e.target.value)} style={{ width: "100%", padding: 8, background: "transparent", color: "inherit", border: "1px solid var(--border, #2a2d36)", borderRadius: 8 }}>
+              {(s.valid_multipliers || [100, 200, 300, 500, 800]).map((v) => <option key={v} value={v}>x{v}</option>)}
+            </select>
+          </div>
         </div>
+      </div>
+
+      <div className="sec-title">PARAMETRI AUTO-TRADING</div>
+      <div className="risk-card">
+        <div className="risk-grid">
+          <div className="risk-field"><label>Stake auto ($)</label><input data-testid="auto-stake-input" type="number" value={autoStake} onChange={(e) => setAutoStake(e.target.value)} min="1"/></div>
+          <div className="risk-field">
+            <label>Leva auto</label>
+            <select data-testid="auto-mult-input" value={autoMult} onChange={(e) => setAutoMult(e.target.value)} style={{ width: "100%", padding: 8, background: "transparent", color: "inherit", border: "1px solid var(--border, #2a2d36)", borderRadius: 8 }}>
+              {(s.valid_multipliers || [100, 200, 300, 500, 800]).map((v) => <option key={v} value={v}>x{v}</option>)}
+            </select>
+          </div>
+          <div className="risk-field"><label>Max posizioni aperte</label><input data-testid="auto-maxpos-input" type="number" value={maxPos} onChange={(e) => setMaxPos(e.target.value)} min="1" max="10"/></div>
+        </div>
+        <button className="btn-save" data-testid="save-auto-settings-btn" onClick={saveAutoSettings} style={{ marginTop: 10 }}>SALVA PARAMETRI AUTO</button>
       </div>
 
       <div className="sec-title">ORDINI MANUALI</div>
@@ -524,6 +601,41 @@ export default function App() {
               Bot server-side: continua a girare anche con app chiusa.
             </div>
           </div>
+        </div>
+      </div>
+
+      <div className={`settings-panel ${historyOpen ? "open" : ""}`}>
+        <div className="settings-header">
+          <div className="settings-title">STORICO OPERAZIONI</div>
+          <div className="settings-close" onClick={() => setHistoryOpen(false)}>✕</div>
+        </div>
+        <div className="settings-body">
+          <div className="settings-env" style={{ marginBottom: 12 }}>
+            <button className={`env-btn ${historyFilter === "all" ? "active" : ""}`} onClick={() => changeHistoryFilter("all")}>TUTTE</button>
+            <button className={`env-btn ${historyFilter === "manual" ? "active" : ""}`} onClick={() => changeHistoryFilter("manual")}>MANUALI</button>
+            <button className={`env-btn ${historyFilter === "auto" ? "active" : ""}`} onClick={() => changeHistoryFilter("auto")}>AUTO</button>
+          </div>
+          {history.length === 0 && <div style={{ textAlign: "center", color: "var(--text2, #888)", padding: 20, fontFamily: "var(--mono)" }}>Nessuna operazione trovata</div>}
+          {history.map((t) => {
+            const isOpen = t.status === "open";
+            const profit = t.profit;
+            const color = isOpen ? "var(--gold)" : (profit >= 0 ? "var(--buy)" : "var(--sell)");
+            return (
+              <div key={t.id} style={{ border: "1px solid var(--border, #2a2d36)", borderRadius: 8, padding: 10, marginBottom: 8, fontFamily: "var(--mono)", fontSize: 12 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                  <span style={{ color: t.direction === "BUY" ? "var(--buy)" : "var(--sell)" }}>{t.direction} · {SYMBOL_LABELS[t.symbol] || t.symbol}</span>
+                  <span style={{ color: "var(--text2, #888)" }}>{t.source === "auto" ? "⚡ auto" : "✋ manuale"}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", color: "var(--text2, #888)" }}>
+                  <span>Stake ${t.stake} · x{t.multiplier} · {STRATEGY_LABELS[t.strategy] || t.strategy}</span>
+                  <span style={{ color }}>{isOpen ? "APERTA" : `${profit >= 0 ? "+" : ""}${(profit || 0).toFixed(2)}`}</span>
+                </div>
+                <div style={{ color: "var(--text2, #888)", marginTop: 2, fontSize: 11 }}>
+                  {t.opened_at ? new Date(t.opened_at).toLocaleString("it-IT") : ""}
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
 
